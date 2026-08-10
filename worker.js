@@ -1,6 +1,7 @@
 'use strict';
 
-const GMP_URL = 'https://cdn.jsdelivr.net/npm/gmp-wasm';
+const BUILD = 'v6';
+const GMP_URL = 'https://cdn.jsdelivr.net/npm/gmp-wasm@1.3.2/dist/index.umd.min.js';
 const LOG2_10 = Math.log2(10);
 let enginePromise = null;
 
@@ -18,24 +19,23 @@ async function loadEngine() {
 }
 
 function precisionBitsForDigits(digits) {
-  return Math.ceil((digits + 32) * LOG2_10);
+  return Math.ceil((digits + 16) * LOG2_10);
 }
 
 async function calculatePi(digits) {
-  postMessage({ type: 'progress', progress: 5, label: 'Loading GMP' });
+  postMessage({ type: 'progress', progress: 3, label: 'Loading GMP' });
 
   const { getContext } = await loadEngine();
+  postMessage({ type: 'ready', engine: `GMP/MPFR ${BUILD}` });
+
   const precisionBits = precisionBitsForDigits(digits);
-
-  postMessage({ type: 'progress', progress: 15, label: 'Computing π' });
-
   const ctx = getContext({ precisionBits });
 
   try {
+    postMessage({ type: 'progress', progress: 15, label: 'Computing π' });
     const pi = ctx.Pi();
 
     postMessage({ type: 'progress', progress: 82, label: 'Formatting' });
-
     const result = pi.toFixed(digits, 10);
 
     postMessage({ type: 'progress', progress: 98, label: 'Finalizing' });
@@ -57,9 +57,6 @@ onmessage = async (event) => {
     const result = await calculatePi(digits);
     postMessage({ type: 'done', result });
   } catch (error) {
-    postMessage({
-      type: 'error',
-      message: error?.message || String(error)
-    });
+    postMessage({ type: 'error', message: error?.message || String(error) });
   }
 };
