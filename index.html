@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0c">
+  <title>π Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark">π</div>
+      <div>
+        <h1>π Lab</h1>
+        <p>High-precision π calculator</p>
+      </div>
+    </header>
+
+    <section class="controls">
+      <label for="digits">Digits after decimal point</label>
+      <div class="input-row">
+        <input id="digits" type="number" min="1" step="1" value="100000" inputmode="numeric" autocomplete="off">
+        <button id="start">Calculate</button>
+        <button id="stop" class="ghost" disabled>Stop</button>
+      </div>
+    </section>
+
+    <section class="progress-wrap">
+      <div class="progress"><div id="bar"></div></div>
+      <div class="meta">
+        <span id="status">Ready</span>
+        <span id="percent">0%</span>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div><span>Time</span><strong id="time">0.000 s</strong></div>
+      <div><span>Speed</span><strong id="speed">0 digits/s</strong></div>
+      <div><span>Threads</span><strong id="threads">—</strong></div>
+      <div><span>Terms</span><strong id="terms">—</strong></div>
+    </section>
+
+    <section class="result-card">
+      <div class="result-head">
+        <strong>Result</strong>
+        <div class="actions">
+          <button id="copy" class="ghost small" disabled>Copy</button>
+          <button id="save" class="ghost small" disabled>Save</button>
+        </div>
+      </div>
+      <pre id="output">3.14159265358979323846…</pre>
+    </section>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
