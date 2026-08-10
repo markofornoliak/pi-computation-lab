@@ -59,7 +59,7 @@ function preview(text) {
 
 function calculate(digits) {
   return new Promise((resolve, reject) => {
-    worker = new Worker('worker.js');
+    worker = new Worker('worker.js?v=4');
 
     worker.onmessage = (event) => {
       if (cancelled) return;
