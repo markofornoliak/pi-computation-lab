@@ -1,8 +1,9 @@
 'use strict';
 
 const DIGITS_PER_TERM = 14.181647462725477;
-const GUARD = 24;
 const PI_PREFIX = '3.14159265358979323846264338327950288419716939937510';
+const MOBILE_LIMIT = 2000000;
+const DESKTOP_LIMIT = 10000000;
 
 const $ = (id) => document.getElementById(id);
 const digitsInput = $('digits');
@@ -19,8 +20,7 @@ const threads = $('threads');
 const terms = $('terms');
 const output = $('output');
 
-let workers = [];
-let finalizer = null;
+let worker = null;
 let cancelled = false;
 let started = 0;
 let timer = 0;
@@ -28,29 +28,10 @@ let result = '';
 let targetDigits = 0;
 
 const format = (n) => Number(n).toLocaleString('en-US');
-
-function chooseWorkers(termCount) {
-  const hardware = Math.max(1, navigator.hardwareConcurrency || 2);
-  const cap = Math.min(8, hardware);
-  if (termCount < 200) return 1;
-  if (termCount < 2000) return Math.min(2, cap);
-  if (termCount < 10000) return Math.min(4, cap);
-  return cap;
-}
-
-function ranges(total, count) {
-  const result = [];
-  let a = 0;
-  for (let i = 0; i < count; i++) {
-    const b = Math.floor((total * (i + 1)) / count);
-    if (b > a) result.push([a, b]);
-    a = b;
-  }
-  return result;
-}
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 function updateProgress(value, label) {
-  const p = Math.max(0, Math.min(100, value));
+  const p = Math.max(0, Math.min(100, Number(value) || 0));
   bar.style.width = `${p}%`;
   percent.textContent = `${p.toFixed(p < 10 ? 1 : 0)}%`;
   if (label) status.textContent = label;
@@ -62,16 +43,14 @@ function setBusy(busy) {
   digitsInput.disabled = busy;
 }
 
-function stopAll() {
-  workers.forEach((worker) => worker.terminate());
-  workers = [];
-  if (finalizer) finalizer.terminate();
-  finalizer = null;
+function stopWorker() {
+  if (worker) worker.terminate();
+  worker = null;
   clearInterval(timer);
 }
 
 function fail(message) {
-  stopAll();
+  stopWorker();
   setBusy(false);
   status.textContent = 'Error';
   output.textContent = message;
@@ -82,97 +61,54 @@ function preview(text) {
   return `${text.slice(0, 8000)}\n\n…\n\n${text.slice(-8000)}`;
 }
 
-async function calculate(digits) {
-  if (typeof Worker === 'undefined' || typeof BigInt === 'undefined') {
-    throw new Error('This browser does not support the required JavaScript features.');
-  }
-
-  const termCount = Math.floor((digits + GUARD) / DIGITS_PER_TERM) + 1;
-  const workerCount = Math.min(chooseWorkers(termCount), termCount);
-  const taskCount = Math.min(termCount, Math.max(workerCount, workerCount * 8));
-  const chunks = ranges(termCount, taskCount);
-  const partials = new Array(chunks.length);
-  let completed = 0;
-  let nextTask = 0;
-  let settled = false;
-
-  threads.textContent = workerCount;
-  terms.textContent = format(termCount);
-
+function calculate(digits) {
   return new Promise((resolve, reject) => {
-    const rejectOnce = (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
+    worker = new Worker('worker.js');
+
+    worker.onmessage = (event) => {
+      if (cancelled) return;
+      const data = event.data;
+
+      if (data.type === 'progress') {
+        updateProgress(data.progress, data.label);
+        return;
+      }
+
+      if (data.type === 'done') {
+        resolve(data.result);
+        return;
+      }
+
+      if (data.type === 'error') {
+        reject(new Error(data.message));
+      }
     };
 
-    const finish = () => {
-      workers.forEach((item) => item.terminate());
-      workers = [];
-
-      finalizer = new Worker('worker.js');
-      finalizer.onmessage = (event) => {
-        if (cancelled || settled) return;
-        const data = event.data;
-
-        if (data.type === 'phase') {
-          updateProgress(data.progress, data.label);
-          return;
-        }
-
-        if (data.type === 'done') {
-          settled = true;
-          resolve(data.result);
-          return;
-        }
-
-        if (data.type === 'error') rejectOnce(new Error(data.message));
-      };
-
-      finalizer.onerror = () => rejectOnce(new Error('Final worker failed.'));
-      finalizer.postMessage({ type: 'finalize', partials, digits, guard: GUARD });
+    worker.onerror = (event) => {
+      reject(new Error(event.message || 'Calculation worker failed.'));
     };
 
-    const dispatch = (worker) => {
-      if (nextTask >= chunks.length) return;
-      const id = nextTask++;
-      const [a, b] = chunks[id];
-      worker.postMessage({ type: 'chunk', id, a, b });
-    };
-
-    for (let i = 0; i < workerCount; i++) {
-      const worker = new Worker('worker.js');
-      workers.push(worker);
-
-      worker.onmessage = (event) => {
-        if (cancelled || settled) return;
-        const data = event.data;
-
-        if (data.type === 'error') {
-          rejectOnce(new Error(data.message));
-          return;
-        }
-
-        if (data.type !== 'chunkDone') return;
-
-        partials[data.id] = data.result;
-        completed++;
-        updateProgress((completed / chunks.length) * 90, 'Calculating');
-
-        if (completed === chunks.length) finish();
-        else dispatch(worker);
-      };
-
-      worker.onerror = () => rejectOnce(new Error('Worker failed.'));
-      dispatch(worker);
-    }
+    worker.postMessage({ type: 'calculate', digits });
   });
 }
 
 startButton.addEventListener('click', async () => {
   const digits = Number(digitsInput.value);
+
   if (!Number.isSafeInteger(digits) || digits < 1) {
     output.textContent = 'Enter a positive integer.';
+    return;
+  }
+
+  const limit = isMobile ? MOBILE_LIMIT : DESKTOP_LIMIT;
+  if (digits > limit) {
+    output.textContent = `Browser safety limit on this device: ${format(limit)} digits. Use a native C++/GMP or y-cruncher build for larger runs.`;
+    status.textContent = 'Too large';
+    return;
+  }
+
+  if (typeof Worker === 'undefined' || typeof BigInt === 'undefined') {
+    output.textContent = 'This browser does not support the required JavaScript features.';
     return;
   }
 
@@ -185,6 +121,8 @@ startButton.addEventListener('click', async () => {
   updateProgress(0, 'Starting');
   output.textContent = 'Computing…';
   speed.textContent = '0 digits/s';
+  threads.textContent = '1';
+  terms.textContent = format(Math.floor((digits + 20) / DIGITS_PER_TERM) + 1);
   started = performance.now();
 
   clearInterval(timer);
@@ -192,20 +130,21 @@ startButton.addEventListener('click', async () => {
     const seconds = (performance.now() - started) / 1000;
     time.textContent = `${seconds.toFixed(3)} s`;
     const p = parseFloat(percent.textContent) || 0;
-    const estimated = digits * (p / 100);
+    const estimated = digits * Math.min(p / 92, 1);
     speed.textContent = `${format(Math.round(estimated / Math.max(seconds, 0.001)))} digits/s`;
   }, 100);
 
   try {
     const pi = await calculate(digits);
     if (cancelled) return;
+
     if (!pi.startsWith(PI_PREFIX.slice(0, Math.min(PI_PREFIX.length, pi.length)))) {
       throw new Error('Verification failed.');
     }
 
     result = pi;
     const seconds = (performance.now() - started) / 1000;
-    stopAll();
+    stopWorker();
     time.textContent = `${seconds.toFixed(3)} s`;
     speed.textContent = `${format(Math.round(digits / Math.max(seconds, 0.001)))} digits/s`;
     updateProgress(100, 'Done');
@@ -214,13 +153,20 @@ startButton.addEventListener('click', async () => {
     saveButton.disabled = false;
     setBusy(false);
   } catch (error) {
-    if (!cancelled) fail(error?.message || String(error));
+    if (!cancelled) {
+      const message = String(error?.message || error);
+      if (/memory|BigInt|allocation/i.test(message)) {
+        fail('Not enough browser memory for this precision. Try fewer digits. For multi-million or larger runs, native C++/GMP or y-cruncher is the correct tool.');
+      } else {
+        fail(message);
+      }
+    }
   }
 });
 
 stopButton.addEventListener('click', () => {
   cancelled = true;
-  stopAll();
+  stopWorker();
   setBusy(false);
   status.textContent = 'Stopped';
   output.textContent = 'Stopped.';
@@ -228,14 +174,18 @@ stopButton.addEventListener('click', () => {
 
 copyButton.addEventListener('click', async () => {
   if (!result) return;
-  await navigator.clipboard.writeText(result);
-  copyButton.textContent = 'Copied';
-  setTimeout(() => { copyButton.textContent = 'Copy'; }, 900);
+  try {
+    await navigator.clipboard.writeText(result);
+    copyButton.textContent = 'Copied';
+    setTimeout(() => { copyButton.textContent = 'Copy'; }, 900);
+  } catch {
+    output.textContent = preview(result);
+  }
 });
 
 saveButton.addEventListener('click', () => {
   if (!result) return;
-  const blob = new Blob([result + '\n'], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([result, '\n'], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
