@@ -1,9 +1,6 @@
 'use strict';
 
-const DIGITS_PER_TERM = 14.181647462725477;
 const PI_PREFIX = '3.14159265358979323846264338327950288419716939937510';
-const MOBILE_LIMIT = 2000000;
-const DESKTOP_LIMIT = 10000000;
 
 const $ = (id) => document.getElementById(id);
 const digitsInput = $('digits');
@@ -28,7 +25,6 @@ let result = '';
 let targetDigits = 0;
 
 const format = (n) => Number(n).toLocaleString('en-US');
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 function updateProgress(value, label) {
   const p = Math.max(0, Math.min(100, Number(value) || 0));
@@ -100,15 +96,8 @@ startButton.addEventListener('click', async () => {
     return;
   }
 
-  const limit = isMobile ? MOBILE_LIMIT : DESKTOP_LIMIT;
-  if (digits > limit) {
-    output.textContent = `Browser safety limit on this device: ${format(limit)} digits. Use a native C++/GMP or y-cruncher build for larger runs.`;
-    status.textContent = 'Too large';
-    return;
-  }
-
-  if (typeof Worker === 'undefined' || typeof BigInt === 'undefined') {
-    output.textContent = 'This browser does not support the required JavaScript features.';
+  if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
+    output.textContent = 'This browser does not support the required WebAssembly features.';
     return;
   }
 
@@ -122,7 +111,7 @@ startButton.addEventListener('click', async () => {
   output.textContent = 'Computing…';
   speed.textContent = '0 digits/s';
   threads.textContent = '1';
-  terms.textContent = format(Math.floor((digits + 20) / DIGITS_PER_TERM) + 1);
+  terms.textContent = 'GMP/MPFR';
   started = performance.now();
 
   clearInterval(timer);
@@ -130,7 +119,7 @@ startButton.addEventListener('click', async () => {
     const seconds = (performance.now() - started) / 1000;
     time.textContent = `${seconds.toFixed(3)} s`;
     const p = parseFloat(percent.textContent) || 0;
-    const estimated = digits * Math.min(p / 92, 1);
+    const estimated = targetDigits * (p / 100);
     speed.textContent = `${format(Math.round(estimated / Math.max(seconds, 0.001)))} digits/s`;
   }, 100);
 
@@ -155,8 +144,8 @@ startButton.addEventListener('click', async () => {
   } catch (error) {
     if (!cancelled) {
       const message = String(error?.message || error);
-      if (/memory|BigInt|allocation/i.test(message)) {
-        fail('Not enough browser memory for this precision. Try fewer digits. For multi-million or larger runs, native C++/GMP or y-cruncher is the correct tool.');
+      if (/memory|allocation|out of bounds|grow/i.test(message)) {
+        fail(`Browser memory limit reached at ${format(digits)} digits.`);
       } else {
         fail(message);
       }
