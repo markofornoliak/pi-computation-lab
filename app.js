@@ -1,5 +1,6 @@
 'use strict';
 
+const BUILD = 'v6';
 const PI_PREFIX = '3.14159265358979323846264338327950288419716939937510';
 
 const $ = (id) => document.getElementById(id);
@@ -25,6 +26,8 @@ let result = '';
 let targetDigits = 0;
 
 const format = (n) => Number(n).toLocaleString('en-US');
+
+terms.textContent = `GMP/MPFR ${BUILD}`;
 
 function updateProgress(value, label) {
   const p = Math.max(0, Math.min(100, Number(value) || 0));
@@ -59,7 +62,7 @@ function preview(text) {
 
 function calculate(digits) {
   return new Promise((resolve, reject) => {
-    worker = new Worker('worker.js?v=4');
+    worker = new Worker(`worker.js?build=${BUILD}&t=${Date.now()}`);
 
     worker.onmessage = (event) => {
       if (cancelled) return;
@@ -70,20 +73,21 @@ function calculate(digits) {
         return;
       }
 
+      if (data.type === 'ready') {
+        threads.textContent = '1';
+        terms.textContent = data.engine || `GMP/MPFR ${BUILD}`;
+        return;
+      }
+
       if (data.type === 'done') {
         resolve(data.result);
         return;
       }
 
-      if (data.type === 'error') {
-        reject(new Error(data.message));
-      }
+      if (data.type === 'error') reject(new Error(data.message));
     };
 
-    worker.onerror = (event) => {
-      reject(new Error(event.message || 'Calculation worker failed.'));
-    };
-
+    worker.onerror = (event) => reject(new Error(event.message || 'Calculation worker failed.'));
     worker.postMessage({ type: 'calculate', digits });
   });
 }
@@ -97,7 +101,7 @@ startButton.addEventListener('click', async () => {
   }
 
   if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
-    output.textContent = 'This browser does not support the required WebAssembly features.';
+    output.textContent = 'This browser does not support WebAssembly workers.';
     return;
   }
 
@@ -108,10 +112,10 @@ startButton.addEventListener('click', async () => {
   copyButton.disabled = true;
   saveButton.disabled = true;
   updateProgress(0, 'Starting');
-  output.textContent = 'Computing…';
+  output.textContent = `Starting ${BUILD}…`;
   speed.textContent = '0 digits/s';
   threads.textContent = '1';
-  terms.textContent = 'GMP/MPFR';
+  terms.textContent = `GMP/MPFR ${BUILD}`;
   started = performance.now();
 
   clearInterval(timer);
@@ -142,14 +146,7 @@ startButton.addEventListener('click', async () => {
     saveButton.disabled = false;
     setBusy(false);
   } catch (error) {
-    if (!cancelled) {
-      const message = String(error?.message || error);
-      if (/memory|allocation|out of bounds|grow/i.test(message)) {
-        fail(`Browser memory limit reached at ${format(digits)} digits.`);
-      } else {
-        fail(message);
-      }
-    }
+    if (!cancelled) fail(String(error?.message || error));
   }
 });
 
